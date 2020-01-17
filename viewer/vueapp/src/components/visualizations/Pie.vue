@@ -225,8 +225,7 @@ export default {
         .data(pie(d3.entries(data)))
         .enter()
         .append('text')
-        .attr('dy', '.25rem')
-        .text(getLabelText);
+        .attr('dy', '.25rem');
 
       // apply text location and transition to new labels
       g.datum(d3.entries(data))
@@ -236,10 +235,11 @@ export default {
         .attrTween('transform', textTransform)
         .styleTween('text-anchor', textTransition);
 
-      // remove any text not being used
+      // remove any text not being used and apply text label data
       g.datum(d3.entries(data))
         .selectAll('text')
         .data(pie(d3.entries(data)))
+        .text(getLabelText)
         .exit().remove();
 
       // LINE TO LABEL ----------------------- //
