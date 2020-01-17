@@ -73,11 +73,30 @@
             <select class="form-control"
               v-model="sortBy"
               @change="changeSortBy">
-              <option value="name">name</option>
-              <option value="graph">graph</option>
+              <option value="name">alphabecially</option>
+              <option value="graph">count</option>
             </select>
           </div>
         </div> <!-- /sort select -->
+
+        <!-- main graph type select -->
+        <div class="form-group ml-1">
+          <div class="input-group input-group-sm">
+            <span class="input-group-prepend cursor-help"
+              v-b-tooltip.hover
+              title="Sort results by">
+              <span class="input-group-text">
+                Graph Type:
+              </span>
+            </span>
+            <select class="form-control"
+              v-model="spiGraphType"
+              @change="changeSpiGraphType">
+              <option value="default">default</option>
+              <option value="pie">pie</option>
+            </select>
+          </div>
+        </div> <!-- /main graph type select -->
 
         <!-- refresh input -->
         <div class="form-group ml-1">
@@ -120,106 +139,91 @@
 
     <div class="spigraph-content">
 
-      <b-tabs v-model="tabIndex">
-        <b-tab title="Default"
-          @click="tabIndexChange(0)">
-          <div v-if="tabIndex === 0">
-          <!-- main visualization -->
-          <div v-if="mapData && graphData"
-            class="well well-sm mb-3 ml-2 mr-2">
-            <moloch-visualizations
-              id="primary"
-              :graph-data="graphData"
-              :map-data="mapData"
-              :primary="true"
-              :timezone="user.settings.timezone"
-              @fetchMapData="cancelAndLoad(true)">
-            </moloch-visualizations>
-          </div> <!-- /main visualization -->
+      <!-- pie graph type -->
+      <div v-if="spiGraphType === 'pie'">
 
-          <!-- values -->
-          <template v-if="fieldObj">
-            <div v-for="(item, index) in items"
-              :key="item.name"
-              class="spi-graph-item pl-3 pr-3 pt-1">
-              <!-- field value -->
-              <div class="row">
-                <div class="col-md-12">
-                  <div class="spi-bucket">
-                    <strong>
-                      <moloch-session-field
-                        :field="fieldObj"
-                        :value="item.name"
-                        :expr="fieldObj.exp"
-                        :parse="true"
-                        :pull-left="true"
-                        :session-btn="true">
-                      </moloch-session-field>
-                    </strong>
-                    <sup>({{ item.count | commaString }})</sup>
-                  </div>
+        <moloch-pie v-if="items && items.length"
+          :graph-data="items">
+        </moloch-pie>
+
+      </div> <!-- /pie graph type -->
+
+      <!-- default graph type -->
+      <div v-else>
+        <!-- main visualization -->
+        <div v-if="mapData && graphData"
+          class="well well-sm mb-3 ml-2 mr-2">
+          <moloch-visualizations
+            id="primary"
+            :graph-data="graphData"
+            :map-data="mapData"
+            :primary="true"
+            :timezone="user.settings.timezone"
+            @fetchMapData="cancelAndLoad(true)">
+          </moloch-visualizations>
+        </div> <!-- /main visualization -->
+
+        <!-- values -->
+        <template v-if="fieldObj">
+          <div v-for="(item, index) in items"
+            :key="item.name"
+            class="spi-graph-item pl-3 pr-3 pt-1">
+            <!-- field value -->
+            <div class="row">
+              <div class="col-md-12">
+                <div class="spi-bucket">
+                  <strong>
+                    <moloch-session-field
+                      :field="fieldObj"
+                      :value="item.name"
+                      :expr="fieldObj.exp"
+                      :parse="true"
+                      :pull-left="true"
+                      :session-btn="true">
+                    </moloch-session-field>
+                  </strong>
+                  <sup>({{ item.count | commaString }})</sup>
                 </div>
-              </div> <!-- /field value -->
-              <!-- field visualization -->
-              <div class="row">
-                <div class="col-md-12">
-                  <moloch-visualizations
-                    :id="index.toString()"
-                    :graph-data="item.graph"
-                    :map-data="item.map"
-                    :primary="false"
-                    :timezone="user.settings.timezone">
-                  </moloch-visualizations>
-                </div>
-              </div> <!-- /field visualization -->
-            </div>
-          </template> <!-- /values -->
-
-          <!-- loading overlay -->
-          <moloch-loading
-            :can-cancel="true"
-            v-if="loading && !error"
-            @cancel="cancelAndLoad">
-          </moloch-loading> <!-- /loading overlay -->
-
-          <!-- page error -->
-          <moloch-error
-            v-if="error"
-            :message="error"
-            class="mt-5 mb-5">
-          </moloch-error> <!-- /page error -->
-
-          <!-- no results -->
-          <moloch-no-results
-            v-if="!error && !loading && !items.length"
-            class="mt-5 mb-5"
-            :records-total="recordsTotal"
-            :view="query.view">
-          </moloch-no-results> <!-- /no results -->
+              </div>
+            </div> <!-- /field value -->
+            <!-- field visualization -->
+            <div class="row">
+              <div class="col-md-12">
+                <moloch-visualizations
+                  :id="index.toString()"
+                  :graph-data="item.graph"
+                  :map-data="item.map"
+                  :primary="false"
+                  :timezone="user.settings.timezone">
+                </moloch-visualizations>
+              </div>
+            </div> <!-- /field visualization -->
           </div>
-        </b-tab>
-        <b-tab title="Pie"
-          @click="tabIndexChange(1)">
-          <moloch-pie v-if="items && items.length && tabIndex === 1"
-            :graph-data="items">
-          </moloch-pie>
+        </template> <!-- /values -->
 
-          <!-- page error -->
-          <moloch-error
-            v-if="error"
-            :message="error"
-            class="mt-5 mb-5">
-          </moloch-error> <!-- /page error -->
+      </div> <!-- /default graph type -->
 
-          <!-- no results -->
-          <moloch-no-results
-            v-if="!error && !loading && !items.length"
-            class="mt-5 mb-5"
-            :records-total="recordsTotal"
-            :view="query.view">
-          </moloch-no-results> <!-- /no results -->
-        </b-tab>
-      </b-tabs>
+      <!-- loading overlay -->
+      <moloch-loading
+        :can-cancel="true"
+        v-if="loading && !error"
+        @cancel="cancelAndLoad">
+      </moloch-loading> <!-- /loading overlay -->
+
+      <!-- page error -->
+      <moloch-error
+        v-if="error"
+        :message="error"
+        class="mt-5 mb-5">
+      </moloch-error> <!-- /page error -->
+
+      <!-- no results -->
+      <moloch-no-results
+        v-if="!error && !loading && !items.length"
+        class="mt-5 mb-5"
+        :records-total="recordsTotal"
+        :view="query.view">
+      </moloch-no-results> <!-- /no results -->
 
     </div>
 
@@ -276,7 +280,7 @@ export default {
       showDropdown: false,
       fieldTypeahead: 'node',
       sortBy: this.$route.query.sort || 'graph',
-      tabIndex: 0 // TODO url param?
+      spiGraphType: this.$route.query.spiGraphType || 'default'
     };
   },
   computed: {
@@ -324,6 +328,9 @@ export default {
     },
     '$route.query.field': function (newVal, oldVal) {
       this.cancelAndLoad(true);
+    },
+    '$route.query.spiGraphType': function (newVal, oldVal) {
+      this.spiGraphType = newVal;
     },
     // watch graph type and update sort
     'graphType': function (newVal, oldVal) {
@@ -424,9 +431,13 @@ export default {
         }, 500);
       }
     },
-    // TODO
-    tabIndexChange: function (newTabIndex) {
-      this.tabIndex = newTabIndex;
+    changeSpiGraphType: function () {
+      this.$router.push({
+        query: {
+          ...this.$route.query,
+          spiGraphType: this.spiGraphType
+        }
+      });
     },
     /* event functions ----------------------------------------------------- */
     changeField: function (field) {
