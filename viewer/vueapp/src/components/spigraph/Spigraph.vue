@@ -60,8 +60,9 @@
           </div>
         </div> <!-- /maxElements select -->
 
-        <!-- sort select -->
-        <div class="form-group ml-1">
+        <!-- sort select (not shown for the pie graph) -->
+        <div class="form-group ml-1"
+          v-if="spiGraphType === 'default'">
           <div class="input-group input-group-sm">
             <span class="input-group-prepend cursor-help"
               v-b-tooltip.hover
@@ -93,13 +94,14 @@
               v-model="spiGraphType"
               @change="changeSpiGraphType">
               <option value="default">default</option>
-              <option value="pie">pie</option>
+              <option value="pie">pie (top talkers)</option>
             </select>
           </div>
         </div> <!-- /main graph type select -->
 
-        <!-- refresh input -->
-        <div class="form-group ml-1">
+        <!-- refresh input (not shown for pie) -->
+        <div class="form-group ml-1"
+          v-if="spiGraphType === 'default'">
           <div class="input-group input-group-sm">
             <span class="input-group-prepend cursor-help"
               v-b-tooltip.hover
@@ -143,7 +145,12 @@
       <div v-if="spiGraphType === 'pie'">
 
         <moloch-pie v-if="items && items.length"
-          :graph-data="items">
+          :base-field="baseField"
+          :graph-data="items"
+          :fields="fields"
+          :query="query"
+          @toggleLoad="toggleLoad"
+          @toggleError="toggleError">
         </moloch-pie>
 
       </div> <!-- /pie graph type -->
@@ -238,7 +245,7 @@ import Vue from 'vue';
 import SpigraphService from './SpigraphService';
 import FieldService from '../search/FieldService';
 import ConfigService from '../utils/ConfigService';
-// import external
+// import internal
 import MolochError from '../utils/Error';
 import MolochSearch from '../search/Search';
 import MolochLoading from '../utils/Loading';
@@ -279,6 +286,7 @@ export default {
       items: [],
       showDropdown: false,
       fieldTypeahead: 'node',
+      baseField: 'node',
       sortBy: this.$route.query.sort || 'graph',
       spiGraphType: this.$route.query.spiGraphType || 'default'
     };
@@ -361,6 +369,7 @@ export default {
           if (field.dbField === this.query.exp ||
             field.exp === this.query.exp) {
             this.fieldTypeahead = field.friendlyName;
+            this.baseField = field.exp;
           }
         }
       }).catch((error) => {
@@ -432,9 +441,18 @@ export default {
       }
     },
     changeSpiGraphType: function () {
+      if (this.spiGraphType === 'pie') {
+        this.query.size = 5; // set default size to 5
+        this.sortBy = 'graph'; // set default sort to count (graph)
+        this.query.sort = this.graphType;
+        this.refresh = 0;
+        this.changeRefreshInterval();
+      }
       this.$router.push({
         query: {
           ...this.$route.query,
+          size: this.query.size,
+          sort: this.sortBy,
           spiGraphType: this.spiGraphType
         }
       });
@@ -443,12 +461,19 @@ export default {
     changeField: function (field) {
       this.fieldTypeahead = field.friendlyName;
       this.query.exp = field.dbField;
+      this.baseField = field.exp;
       this.$router.push({
         query: {
           ...this.$route.query,
           field: this.query.exp
         }
       });
+    },
+    toggleLoad: function (loading) {
+      this.loading = loading;
+    },
+    toggleError: function (message) {
+      this.error = message;
     },
     /* helper functions ---------------------------------------------------- */
     loadData: function () {
