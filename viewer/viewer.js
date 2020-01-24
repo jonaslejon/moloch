@@ -5442,6 +5442,8 @@ app.get('/spigraphpie', logAction(), (req, res) => {
           value: level1Field.doc_count
         }
         if (level1Field.field) {
+          // TODO exclude 0 counts from showing up in the data for 'other'
+          // TODO sort the data by count
           result.subData = {
             other: level1Field.field.sum_other_doc_count
           }

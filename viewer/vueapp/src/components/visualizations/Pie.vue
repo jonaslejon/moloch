@@ -64,7 +64,7 @@ let pendingPromise; // save a pending promise to be able to cancel it
 let width = window.innerWidth;
 let height = 600;
 let radius = Math.min(width, height) / 2;
-let g, svg, pie, arc, outerArc;
+let g, g2, svg, pie, arc, arc2, outerArc, outerArc2;
 
 // pie functions
 function midAngle (d) {
@@ -80,6 +80,16 @@ function sliceTransition (d) {
   };
 };
 
+// TODO
+function sliceTransition2 (d) {
+  this._current = this._current || d;
+  let interpolate = d3.interpolate(this._current, d);
+  this._current = interpolate(0);
+  return function (t) {
+    return arc2(interpolate(t));
+  };
+}
+
 function textTransform (d) {
   this._current = this._current || d;
   const interpolate = d3.interpolate(this._current, d);
@@ -87,6 +97,19 @@ function textTransform (d) {
   return function (t) {
     const d2 = interpolate(t);
     let pos = outerArc.centroid(d2);
+    pos[0] = radius * (midAngle(d2) < Math.PI ? 1 : -1);
+    return 'translate(' + pos + ')';
+  };
+};
+
+// TODO
+function textTransform2 (d) {
+  this._current = this._current || d;
+  const interpolate = d3.interpolate(this._current, d);
+  this._current = interpolate(0);
+  return function (t) {
+    const d2 = interpolate(t);
+    let pos = outerArc2.centroid(d2);
     pos[0] = radius * (midAngle(d2) < Math.PI ? 1 : -1);
     return 'translate(' + pos + ')';
   };
@@ -106,7 +129,7 @@ function getLabelText (d) {
   return `${d.data.key} (${d.value})`;
 }
 
-function polylineTransition (d) {
+function polylineTransform (d) {
   this._current = this._current || d;
   const interpolate = d3.interpolate(this._current, d);
   this._current = interpolate(0);
@@ -118,6 +141,25 @@ function polylineTransition (d) {
     arcCentroid[0] = arcCentroid[0] - (arcCentroid[0] * -0.2);
     arcCentroid[1] = arcCentroid[1] - (arcCentroid[1] * -0.2);
     return [arcCentroid, outerArc.centroid(d2), pos];
+  };
+}
+
+// TODO
+function polylineTransform2 (d) {
+  if (d.data.value.subIndex > 1) {
+    return; // only display the first 2
+  }
+  this._current = this._current || d;
+  const interpolate = d3.interpolate(this._current, d);
+  this._current = interpolate(0);
+  return function (t) {
+    const d2 = interpolate(t);
+    let pos = outerArc2.centroid(d2);
+    pos[0] = radius * 0.95 * (midAngle(d2) < Math.PI ? 1 : -1);
+    let arcCentroid = arc2.centroid(d2);
+    arcCentroid[0] = arcCentroid[0] - (arcCentroid[0] * -0.1);
+    arcCentroid[1] = arcCentroid[1] - (arcCentroid[1] * -0.1);
+    return [arcCentroid, outerArc2.centroid(d2), pos];
   };
 }
 
@@ -156,7 +198,25 @@ export default {
      */
     removeField: function (index) {
       this.fieldTypeaheadList.splice(index, 1);
-      this.loadData();
+      if (g2) {
+        // remove slices
+        g2.datum(d3.entries({}))
+          .selectAll('path')
+          .data(pie(d3.entries({})))
+          .exit().remove();
+        // remove labels
+        g2.datum(d3.entries({}))
+          .selectAll('text')
+          .data(pie(d3.entries({})))
+          .exit().remove();
+        // remove polylines
+        g2.datum(d3.entries({}))
+          .selectAll('polyline')
+          .data(pie(d3.entries({})))
+          .exit().remove();
+      }
+      // TODO add back the labels and lines for the inner pie
+      this.loadData(); // TODO need this?
     },
     /* event functions ----------------------------------------------------- */
     changeField: function (field) {
@@ -239,18 +299,17 @@ export default {
 
       g = svg.append('g');
 
-      // TODO remove if we don't shuffle the data
-      pie = d3.pie().value((d) => { return d.value; });
-      // pie = d3.pie().value((d) => {
-      //   if (d && d.value && d.value.value) {
-      //     return d.value.value;
-      //   };
-      // }).sort((a, b) => {
-      //   if (a && a.value && a.value.idx) {
-      //     return a.value.idx - b.value.idx;
-      //   }
-      //   return true;
-      // });
+      pie = d3.pie().value((d) => {
+        if (d && d.value && d.value.value) {
+          return d.value.value;
+        };
+        return d.value;
+      }).sort((a, b) => {
+        if (a && a.value && a.value.index) {
+          return a.value.index - b.value.index;
+        }
+        return true;
+      });
 
       arc = d3.arc()
         .innerRadius(radius * 0.7)
@@ -339,7 +398,7 @@ export default {
       g.datum(d3.entries(data))
         .selectAll('polyline')
         .transition().duration(1000)
-        .attrTween('points', polylineTransition);
+        .attrTween('points', polylineTransform);
 
       // remove any lines not being used
       g.datum(d3.entries(data))
@@ -374,13 +433,41 @@ export default {
       cancellablePromise.then((response) => {
         pendingPromise = null;
         this.$emit('toggleLoad', false);
-        // TODO add the data to the graph
+
+        // TODO need to redraw the entire graph because the inner shit comes
+        // out different
+
+        // add the data to the graph
         // TODO maybe determine if there is multilevel data
         // (if we need 2 different functions, one for single level data one for multilevel data)
+        let innerData = {};
+        let outerData = {};
+        let index = 0;
+        let parentIndex = 0;
+
+        // create a data object and identify the parent index (which bucket a
+        // value belongs to) and the index of the value itself (for coloring)
         for (let item in response.data) {
-          console.log('add more data for:', item); // TODO ECR REMOVE
-          this.applyMoreGraphData(response.data[item].subData);
+          innerData[item] = response.data[item].value;
+          let subIndex = 0;
+          for (let subItem in response.data[item].subData) {
+            // TODO do we want unique colors or colors per key/name?
+            outerData[`${subItem}-${parentIndex}`] = {
+            // outerData[subItem] = {
+              value: response.data[item].subData[subItem],
+              parentIndex: parentIndex,
+              index: index,
+              name: subItem,
+              subIndex: subIndex
+            };
+            index++;
+            subIndex++;
+          }
+          parentIndex++;
         }
+
+        this.applyGraphData(innerData);
+        this.applyMoreGraphData(outerData);
       }).catch((error) => {
         pendingPromise = null;
         this.$emit('toggleLoad', false);
@@ -390,31 +477,121 @@ export default {
     // TODO make this apply more graph data (2nd and 3rd layers)???????????????
     // TODO generalize this function and combine it with applyGraphData????????
     applyMoreGraphData: function (data) {
-      // create new arc function to put data outisde of current data
-      let arc2 = d3.arc()
-        .innerRadius(radius * 0.7 * 1.8)
-        .outerRadius(radius * 0.4 * 1.8)
+      let colors = this.generateColors(data);
+
+      // create new arc functions to put data outisde of current data
+      arc2 = d3.arc()
+        .innerRadius(radius * 0.9)
+        .outerRadius(radius * 0.7)
         .cornerRadius(6);
 
-      // TODO ECR REMOVE
-      console.log('adding data to graph:', data);
-      console.log('d3 formatted data', d3.entries(data));
+      outerArc2 = d3.arc()
+        .innerRadius(radius * 0.95)
+        .outerRadius(radius * 0.95);
 
+      // TODO ECR REMOVE
+      // console.log('adding data to graph:', data);
+      // console.log('d3 formatted data', d3.entries(data));
+
+      // TODO remove labels from inner pie?
+      // remove labels from inner pie
+      g.datum(d3.entries({}))
+        .selectAll('text')
+        .data(pie(d3.entries({})))
+        .exit().remove();
+      // remove lines from slices to labels from inner pie
+      g.datum(d3.entries({}))
+        .selectAll('polyline')
+        .data(pie(d3.entries({})))
+        .exit().remove();
+
+      // add another g to add the new pie data
+      g2 = svg.append('g');
+
+      // PIE SLICES -------------------------- //
       // add any new slices
-      g.datum(d3.entries(data))
+      g2.datum(d3.entries(data))
         .selectAll('path')
         .data(pie(d3.entries(data)))
         .enter()
         .append('path')
-        // .attr('d', arc2)
-        .attr('d', (d, i, j) => {
-          // TODO why does this only get called once?
-          console.log('apply arc!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!', d, i, j);
-          return arc2(d);
-        })
+        .attr('d', arc2)
         .attr('stroke', 'white')
         .style('stroke-width', '2px')
         .style('opacity', 0.8);
+
+      // apply color to the new slices
+      g2.selectAll('path')
+        .attr('fill', (d) => {
+          // TODO do we want unique colors or colors per key/name?
+          // return colors(d.data.key);
+          return colors(`${d.data.key}-${d.data.parentIndex}`);
+        });
+
+      // add transition to new slices
+      g2.datum(d3.entries(data))
+        .selectAll('path')
+        .data(pie(d3.entries(data)))
+        .transition().duration(1000)
+        .attrTween('d', sliceTransition2);
+
+      // remove any slices not being used
+      g2.datum(d3.entries(data))
+        .selectAll('path')
+        .data(pie(d3.entries(data)))
+        .exit().remove();
+
+      // TODO hover over item to see values?
+      // TODO or just show largest sections?
+      // TODO or both!?
+      // TEXT LABELS ------------------------- //
+      // add any new text
+      g2.datum(d3.entries(data))
+        .selectAll('text')
+        .data(pie(d3.entries(data)))
+        .enter()
+        .append('text')
+        .attr('dy', '.25rem');
+
+      // apply text location and transition to new labels
+      g2.datum(d3.entries(data))
+        .selectAll('text')
+        .data(pie(d3.entries(data)))
+        .transition().duration(1000)
+        .attrTween('transform', textTransform2)
+        .styleTween('text-anchor', textTransition);
+
+      // remove any text not being used and apply text label data
+      g2.datum(d3.entries(data))
+        .selectAll('text')
+        .data(pie(d3.entries(data)))
+        .text((d) => {
+          // only return the top 2 labels
+          if (d.data.value.subIndex < 2) {
+            return `${d.data.value.name} (${d.data.value.value})`;
+          }
+        })
+        .exit().remove();
+
+      // LINE TO LABEL ----------------------- //
+      // add any new lines from slices to labels
+      g2.datum(d3.entries(data))
+        .selectAll('polyline')
+        .data(pie(d3.entries(data)))
+        .enter()
+        .append('polyline');
+
+      // apply transitions to new lines
+      g2.datum(d3.entries(data))
+        .selectAll('polyline')
+        .transition().duration(1000)
+        .attrTween('points', polylineTransform2);
+
+      // remove any lines not being used
+      g2.datum(d3.entries(data))
+        .selectAll('polyline')
+        .data(pie(d3.entries(data)))
+        .exit().remove();
     }
   },
   beforeDestroy: function () {
