@@ -5440,7 +5440,7 @@ app.get('/spigraphpie', logAction(), (req, res) => {
       for (let level1Field of result.aggregations.field.buckets) {
         let result = results[level1Field.key] = {
           value: level1Field.doc_count
-        }
+        };
         if (level1Field.field) {
           result.subData = {};
           // only include the other category if there is data in it
