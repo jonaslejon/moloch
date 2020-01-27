@@ -129,7 +129,8 @@
           </div>
         </div> <!-- /refresh input-->
 
-        <div class="ml-1 records-display">
+        <div v-if="spiGraphType === 'default'"
+          class="ml-1 records-display">
           <strong class="text-theme-accent"
             v-if="!error && recordsFiltered !== undefined">
             Showing {{ recordsFiltered | commaString }} entries filtered from

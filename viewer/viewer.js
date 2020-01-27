@@ -5442,10 +5442,10 @@ app.get('/spigraphpie', logAction(), (req, res) => {
           value: level1Field.doc_count
         }
         if (level1Field.field) {
-          // TODO exclude 0 counts from showing up in the data for 'other'
-          // TODO sort the data by count
-          result.subData = {
-            other: level1Field.field.sum_other_doc_count
+          result.subData = {};
+          // only include the other category if there is data in it
+          if (level1Field.field.sum_other_doc_count > 0) {
+            result.subData.other = level1Field.field.sum_other_doc_count;
           }
           for (let level2Field of level1Field.field.buckets) {
             result.subData[level2Field.key] = level2Field.doc_count;
