@@ -942,8 +942,12 @@ void moloch_db_save_session(MolochSession_t *session, int final)
             HASH_FORALL_POP_HEAD(t_, *cihash, certs,
                 BSB_EXPORT_u08(jbsb, '{');
 
-
                 BSB_EXPORT_sprintf(jbsb, "\"hash\":\"%s\",", certs->hash);
+
+                if (certs->publicAlgorithm)
+                    BSB_EXPORT_sprintf(jbsb, "\"publicAlgorithm\":\"%s\",", certs->publicAlgorithm);
+                if (certs->curve)
+                    BSB_EXPORT_sprintf(jbsb, "\"curve\":\"%s\",", certs->curve);
 
                 SAVE_STRING_HEAD(certs->issuer.commonName, "issuerCN");
                 SAVE_STRING_HEAD(certs->issuer.orgName, "issuerON");
@@ -2364,9 +2368,9 @@ void moloch_db_init()
         }
     }
     if (config.ouiFile)
-        moloch_config_monitor_file("oui file", config.ouiFile, moloch_db_load_oui);
+        moloch_config_monitor_file_msg("oui file", config.ouiFile, moloch_db_load_oui, "Maybe try running /data/moloch/bin/moloch_update_geo.sh");
     if (config.rirFile)
-        moloch_config_monitor_file("rir file", config.rirFile, moloch_db_load_rir);
+        moloch_config_monitor_file_msg("rir file", config.rirFile, moloch_db_load_rir, "Maybe try running /data/moloch/bin/moloch_update_geo.sh");
 
     if (!config.dryRun) {
         int t = 0;
