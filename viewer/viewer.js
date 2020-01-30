@@ -5444,14 +5444,24 @@ app.get('/spigraphpie', logAction(), (req, res) => {
           value: level1Field.doc_count
         };
         if (level1Field.field) {
+          let otherValue;
+          let previousValue;
+          if (level1Field.field.sum_other_doc_count > 0) {
+            otherValue = level1Field.field.sum_other_doc_count;
+          }
           result.subData = {};
           // only include the other category if there is data in it
-          if (level1Field.field.sum_other_doc_count > 0) {
-            result.subData.other = level1Field.field.sum_other_doc_count;
-          }
           for (let level2Field of level1Field.field.buckets) {
-            result.subData[level2Field.key] = level2Field.doc_count;
+            let currentValue = level2Field.doc_count;
+            // put the "other" category in the right position of the map
+            if (otherValue > 0 && ((!previousValue && otherValue > currentValue) ||
+              (previousValue > otherValue && otherValue > currentValue))) {
+              result.subData.other = level1Field.field.sum_other_doc_count;
+            }
+            result.subData[level2Field.key] = currentValue;
+            previousValue = level2Field.doc_count;
           }
+
         }
       }
 

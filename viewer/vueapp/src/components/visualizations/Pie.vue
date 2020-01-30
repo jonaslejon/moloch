@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="spigraph-pie">
 
     <!-- field select -->
     <div class="form-inline pl-1">
@@ -36,6 +36,12 @@
       </template>
     </div> <!-- /field select -->
 
+    <!-- info area -->
+    <div ref="infoPopup">
+      <div class="pie-popup">
+      </div>
+    </div> <!-- /info area -->
+
     <!-- pie chart area -->
     <div id="pie-area"
       class="horizontal-center">
@@ -59,11 +65,13 @@ import Utils from '../utils/utils';
 
 let pendingPromise; // save a pending promise to be able to cancel it
 
+let popupVue; // vue component to mount when showing pie slice information
+
 // page pie variables
 let height = 600;
 let width = window.innerWidth;
 let radius = Math.min(width, height) / 2;
-let g, g2, svg, pie, tooltip;
+let g, g2, svg, pie;
 
 const arc = d3.arc()
   .innerRadius(radius * 0.7)
@@ -82,10 +90,6 @@ const arc2 = d3.arc()
 const outerArc2 = d3.arc()
   .innerRadius(radius * 0.95)
   .outerRadius(radius * 0.95);
-
-const innerLabelArc = d3.arc()
-  .innerRadius(radius * 0.7 - 25)
-  .outerRadius(radius * 0.4 - 25);
 
 // pie functions
 function midAngle (d) {
@@ -111,11 +115,6 @@ function textTransform (d, arcFunc, _current) {
     return `translate(${pos})`;
   };
 };
-
-// put the text on top of the pie slices
-function textTransformOnSlice (d) {
-  return `translate(${innerLabelArc.centroid(d)})`;
-}
 
 function textTransition (d) {
   this._current = this._current || d;
@@ -170,22 +169,20 @@ function polylineTransform2 (d) {
   };
 }
 
-function mouseover (d) {
-  tooltip.style('opacity', 1)
-    .html(() => {
-      if (d.data.value.name) {
-        return `${d.data.value.name} <br><strong>${d.data.value.value}</strong>`;
-      } else {
-        return `${d.data.key}: <br><strong>${d.data.value}</strong>`;
-      }
-    });
-  d3.select(this).style('opacity', 1);
+function mouseover (d, self) {
+  d3.select(self).style('opacity', 1);
+}
+
+function mouseleave (d, self) {
+  d3.select(self).style('opacity', 0.8);
 };
 
-function mouseleave (d) {
-  tooltip.style('opacity', 0);
-  d3.select(this).style('opacity', 0.8);
-};
+// close popups helper
+function closeInfo () {
+  if (popupVue) { popupVue.$destroy(); }
+  popupVue = undefined;
+  $('.pie-popup').hide();
+}
 
 export default {
   name: 'MolochPie',
@@ -314,9 +311,14 @@ export default {
       g = svg.append('g');
 
       pie = d3.pie().value((d) => {
+        // show the scaled value if it exists (so buckets fit data)
+        if (d && d.value && d.value.scaledValue) {
+          return d.value.scaledValue;
+        }
+        // otherwise show the exact value
         if (d && d.value && d.value.value) {
           return d.value.value;
-        };
+        }
         return d.value;
       }).sort((a, b) => {
         if (a && a.value && a.value.index) {
@@ -325,15 +327,31 @@ export default {
         return true;
       });
 
-      // TOOLTIPS ---------------------------- //
-      tooltip = d3.select('#pie-area')
-        .append('div')
-        .style('opacity', 0)
-        .attr('class', 'tooltip')
-        .style('text-align', 'center')
-        .style('padding', '5px');
-
       this.applyGraphData(data, g, arc, outerArc, polylineTransform, getLabelText);
+    },
+    /**
+     * Displays the information about a pie slice
+     * Note: must be here and not top level so that this.$refs works
+     * @param {Object} d The pie slice data
+     */
+    showInfo: function (d) {
+      // create the vue template
+      if (!popupVue) {
+        popupVue = new Vue({
+          template: `
+            <div class="pie-popup">
+              {{ d.data.value.name || d.datakey }}
+              <br>
+              <strong>
+                {{ d.data.value.value || d.data.value }}
+              </strong>
+            </div>
+          `,
+          data: { d: d }
+        }).$mount($(this.$refs.infoPopup)[0].firstChild);
+      }
+      // display the pie popup area
+      $('.pie-popup').show();
     },
     /**
      * Applies the graph data to the pie chart by adding the slices, text labels,
@@ -349,6 +367,7 @@ export default {
      */
     applyGraphData: function (data, gArea, arcFunc, outerArcFunc, lineTransFunc, labelTextFunc) {
       let colors = this.generateColors(data);
+      let vueSelf = this;
 
       // PIE SLICES -------------------------- //
       // add any new slices
@@ -361,8 +380,14 @@ export default {
         .attr('stroke', 'white')
         .style('stroke-width', '2px')
         .style('opacity', 0.8)
-        .on('mouseover', mouseover)
-        .on('mouseleave', mouseleave);
+        .on('mouseover', function (d) {
+          mouseover(d, this);
+          vueSelf.showInfo(d);
+        })
+        .on('mouseleave', function (d) {
+          mouseleave(d, this);
+          closeInfo();
+        });
 
       // apply color to ALL of the slices (not just the new ones)
       gArea.selectAll('path')
@@ -412,6 +437,13 @@ export default {
         .exit().remove();
 
       // LINE TO LABEL ----------------------- //
+      // remove all lines (because removing them with provided data doesn't
+      // work for some insane and unknown reason)
+      gArea.datum(d3.entries({}))
+        .selectAll('polyline')
+        .data(pie(d3.entries({})))
+        .exit().remove();
+
       // add any new lines from slices to labels
       gArea.datum(d3.entries(data))
         .selectAll('polyline')
@@ -422,14 +454,9 @@ export default {
       // apply transitions to new lines
       gArea.datum(d3.entries(data))
         .selectAll('polyline')
+        .data(pie(d3.entries(data)))
         .transition().duration(1000)
         .attrTween('points', lineTransFunc);
-
-      // remove any lines not being used
-      gArea.datum(d3.entries(data))
-        .selectAll('polyline')
-        .data(pie(d3.entries(data)))
-        .exit().remove();
     },
     loadData: function () {
       this.$emit('toggleLoad', true);
@@ -472,10 +499,13 @@ export default {
             name: item,
             value: response.data[item].value
           };
+
           let subIndex = 0;
+          let subBucketsSum = 0;
           for (let subItem in response.data[item].subData) {
+            let value = response.data[item].subData[subItem];
             outerData[`${subItem}-${parentIndex}`] = {
-              value: response.data[item].subData[subItem],
+              value: value,
               parentIndex: parentIndex,
               index: index,
               name: subItem,
@@ -483,18 +513,22 @@ export default {
             };
             index++;
             subIndex++;
+            subBucketsSum += value;
           }
+
+          // scale the inner data so that outer data fits the bucket
+          innerData[item].scaledValue = innerData[item].value * (subBucketsSum / innerData[item].value);
           parentIndex++;
         }
 
+        // add the data to the inner circle (it might have changed)
         this.applyGraphData(innerData, g, arc, outerArc, polylineTransform, getLabelText);
         if (index > 0) { // if there's outer data
-          // put inner labels on pie slices
-          g.selectAll('text')
-            .transition().duration(1000)
-            .style('text-anchor', 'middle')
-            .attr('transform', textTransformOnSlice)
-            .styleTween('text-anchor', textTransition);
+          // remove the inner labels
+          g.datum(d3.entries({}))
+            .selectAll('text')
+            .data(pie(d3.entries({})))
+            .exit().remove();
 
           // remove lines from slices to labels from inner pie
           g.datum(d3.entries({}))
@@ -504,6 +538,7 @@ export default {
 
           // add another g to add the new pie data
           if (!g2) { g2 = svg.append('g'); }
+          // add data to the outer circle
           this.applyGraphData(outerData, g2, arc2, outerArc2, polylineTransform2, getTopLabelText);
         }
       }).catch((error) => {
@@ -525,10 +560,30 @@ export default {
 <style>
 /* styling for the lines connecting the labels to the slices
    make sure they are lines, not triangles (no fill) */
-polyline {
+.spigraph-pie polyline {
   fill: none;
   opacity: .3;
   stroke: black;
   stroke-width: 2px;
+}
+
+/* this needs to not be scoped because it's a child component */
+/* pie slice data popup */
+.spigraph-pie div.pie-popup {
+  position: absolute;
+  left: 5px;
+  bottom: 30px;
+  max-height: 200px;
+  display: none;
+  padding: 4px 8px;
+  max-width: 400px;
+  min-width: 280px;
+  border-radius: 4px;
+  border: solid 1px var(--color-gray);
+  background: var(--color-primary-lightest);
+  text-align: center;
+  overflow-x: visible;
+  overflow-y: auto;
+  text-overflow: ellipsis;
 }
 </style>
