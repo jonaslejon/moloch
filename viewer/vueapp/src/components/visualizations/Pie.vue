@@ -66,6 +66,7 @@ import Utils from '../utils/utils';
 let pendingPromise; // save a pending promise to be able to cancel it
 
 let popupVue; // vue component to mount when showing pie slice information
+let popupTimer; // timer to debounce pie slice info popup events
 
 // page pie variables
 let height = 600;
@@ -184,6 +185,13 @@ function closeInfo () {
   $('.pie-popup').hide();
 }
 
+// close popup on escape press
+function closeInfoOnEsc (keyCode) {
+  if (event.keyCode === 27) { // esc
+    closeInfo();
+  }
+}
+
 export default {
   name: 'MolochPie',
   components: { MolochFieldTypeahead },
@@ -195,8 +203,15 @@ export default {
   },
   data: function () {
     return {
-      fieldTypeaheadList: []
+      fieldTypeaheadList: [],
+      closeInfo: closeInfo
     };
+  },
+  mounted: function () {
+    this.initializeGraph(this.formatDataFromSpigraph(this.graphData));
+
+    // close info popup if the user presses escape
+    window.addEventListener('keyup', closeInfoOnEsc);
   },
   watch: {
     'graphData': function (newVal, oldVal) {
@@ -209,9 +224,6 @@ export default {
         this.applyGraphData(data, g, arc, outerArc, polylineTransform, getLabelText);
       }
     }
-  },
-  mounted: function () {
-    this.initializeGraph(this.formatDataFromSpigraph(this.graphData));
   },
   methods: {
     /* exposed page functions ---------------------------------------------- */
@@ -242,6 +254,17 @@ export default {
 
       this.loadData();
     },
+    /**
+     * Adds an expression to the search expression input box
+     * @param {Object} slice  The pie slice data
+     * @param {String} op     The operator to apply to the search expression ('||' or '&&')
+     */
+    addExpression: function (slice, op) {
+      let fullExpression = `${slice.field} == ${slice.name}`;
+      this.$store.commit('addToExpression', {
+        expression: fullExpression, op: op
+      });
+    },
     /* event functions ----------------------------------------------------- */
     changeField: function (field) {
       // TODO allow 2 items in this array?
@@ -266,7 +289,8 @@ export default {
       for (let item of data) {
         formattedData[item.name] = {
           name: item.name,
-          value: item.count
+          value: item.count,
+          field: this.baseField
         };
       }
       return formattedData;
@@ -335,23 +359,122 @@ export default {
      * @param {Object} d The pie slice data
      */
     showInfo: function (d) {
+      closeInfo(); // close open info section
       // create the vue template
       if (!popupVue) {
         popupVue = new Vue({
           template: `
             <div class="pie-popup">
-              {{ d.data.value.name || d.datakey }}
-              <br>
-              <strong>
-                {{ d.data.value.value || d.data.value }}
-              </strong>
+              <table class="table table-borderless table-condensed table-sm">
+                <thead>
+                  <tr>
+                    <th>
+                      Field
+                    </th>
+                    <th>
+                      Value
+                    </th>
+                    <th>
+                      <a class="pull-right cursor-pointer no-decoration"
+                        @click="closeInfo">
+                        <span class="fa fa-close"></span>
+                      </a>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="outerFieldObj">
+                    <td>
+                      {{ outerFieldObj.friendlyName }}
+                    </td>
+                    <td>
+                      <moloch-session-field
+                        :field="outerFieldObj"
+                        :value="sliceData.name"
+                        :expr="outerFieldObj.exp"
+                        :parse="true"
+                        :session-btn="true">
+                      </moloch-session-field>
+                    </td>
+                    <td>
+                      <strong>
+                        {{ sliceData.value }}
+                      </strong>
+                    </td>
+                  </tr>
+                  <tr v-else-if="baseFieldObj">
+                    <td>
+                      {{ baseFieldObj.friendlyName }}
+                    </td>
+                    <td>
+                      <moloch-session-field
+                        :field="baseFieldObj"
+                        :value="sliceData.name"
+                        :expr="baseFieldObj.exp"
+                        :parse="true"
+                        :session-btn="true">
+                      </moloch-session-field>
+                    </td>
+                    <td>
+                      <strong>
+                        {{ sliceData.value }}
+                      </strong>
+                    </td>
+                  </tr>
+                  <tr v-if="sliceData.innerData">
+                    <td>
+                      {{ baseFieldObj.friendlyName }}
+                    </td>
+                    <td>
+                      <moloch-session-field
+                        :field="baseFieldObj"
+                        :value="sliceData.innerData.name"
+                        :expr="baseFieldObj.exp"
+                        :parse="true"
+                        :session-btn="true">
+                      </moloch-session-field>
+                    </td>
+                    <td>
+                      <strong>
+                        {{ sliceData.innerData.value }}
+                      </strong>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           `,
-          data: { d: d }
+          parent: this,
+          data: {
+            sliceData: d.data.value,
+            baseFieldObj: this.getFieldObj(this.baseField),
+            outerFieldObj: this.fieldTypeaheadList[0] || undefined
+          },
+          methods: {
+            addExpression: function (slice, op) {
+              this.$parent.addExpression(slice, op);
+            },
+            closeInfo: function () {
+              this.$parent.closeInfo();
+            }
+          }
         }).$mount($(this.$refs.infoPopup)[0].firstChild);
       }
       // display the pie popup area
       $('.pie-popup').show();
+    },
+    /**
+     * Gets a field object based on an exp
+     * @param {String} exp      The exp of the field to retrieve
+     * @returns {Object} field  The field that matches the exp or undefined if not found
+     */
+    getFieldObj: function (exp) {
+      for (let field of this.$parent.fields) {
+        if (field.exp === exp) {
+          return field;
+        }
+      }
+      return undefined;
     },
     /**
      * Applies the graph data to the pie chart by adding the slices, text labels,
@@ -382,11 +505,17 @@ export default {
         .style('opacity', 0.8)
         .on('mouseover', function (d) {
           mouseover(d, this);
-          vueSelf.showInfo(d);
+          if (popupTimer) { clearTimeout(popupTimer); }
+          popupTimer = setTimeout(() => {
+            vueSelf.showInfo(d);
+          }, 400);
         })
         .on('mouseleave', function (d) {
           mouseleave(d, this);
-          closeInfo();
+          if (popupTimer) { clearTimeout(popupTimer); }
+        })
+        .on('click', (d) => {
+          this.addExpression(d.data.value, '||');
         });
 
       // apply color to ALL of the slices (not just the new ones)
@@ -497,7 +626,9 @@ export default {
         for (let item in response.data) {
           innerData[item] = {
             name: item,
-            value: response.data[item].value
+            value: response.data[item].value,
+            // save the field to add to the search expression
+            field: this.baseField
           };
 
           let subIndex = 0;
@@ -509,7 +640,11 @@ export default {
               parentIndex: parentIndex,
               index: index,
               name: subItem,
-              subIndex: subIndex
+              subIndex: subIndex,
+              // save the inner data to show on hover
+              innerData: innerData[item],
+              // save the field to add to the search expression
+              field: this.fieldTypeaheadList[0].exp
             };
             index++;
             subIndex++;
@@ -553,6 +688,38 @@ export default {
       pendingPromise.source.cancel();
       pendingPromise = null;
     }
+
+    // remove listeners
+    window.removeEventListener('keyup', closeInfoOnEsc);
+    // d3 doesn't have .off function to remove listeners,
+    // so use .on('listener', null)
+    g.selectAll('path')
+      .on('click', null)
+      .on('mouseover', null)
+      .on('mouseleave', null);
+    g2.selectAll('path')
+      .on('click', null)
+      .on('mouseover', null)
+      .on('mouseleave', null);
+
+    // remove svg elements
+    svg.selectAll('path').exit().remove();
+    svg.selectAll('text').exit().remove();
+    svg.selectAll('polylines').exit().remove();
+
+    // destroy child component
+    $('.info-popup').remove();
+    if (popupVue) { popupVue.$destroy(); }
+
+    // cleanup global vars
+    setTimeout(() => {
+      g = undefined;
+      g2 = undefined;
+      svg = undefined;
+      pie = undefined;
+      popupVue = undefined;
+      popupTimer = undefined;
+    });
   }
 };
 </script>
@@ -571,9 +738,9 @@ export default {
 /* pie slice data popup */
 .spigraph-pie div.pie-popup {
   position: absolute;
-  left: 5px;
-  bottom: 30px;
-  max-height: 200px;
+  right: 5px;
+  top: 160px;
+  max-height: 500px;
   display: none;
   padding: 4px 8px;
   max-width: 400px;
@@ -581,9 +748,7 @@ export default {
   border-radius: 4px;
   border: solid 1px var(--color-gray);
   background: var(--color-primary-lightest);
-  text-align: center;
-  overflow-x: visible;
-  overflow-y: auto;
+  overflow: visible;
   text-overflow: ellipsis;
 }
 </style>
