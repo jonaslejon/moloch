@@ -43,8 +43,7 @@
     </div> <!-- /info area -->
 
     <!-- pie chart area -->
-    <div id="pie-area"
-      class="horizontal-center">
+    <div id="pie-area">
     </div>
     <!-- /pie chart area -->
 
@@ -64,35 +63,40 @@ import MolochFieldTypeahead from '../utils/FieldTypeahead';
 import Utils from '../utils/utils';
 
 let pendingPromise; // save a pending promise to be able to cancel it
-
 let popupVue; // vue component to mount when showing pie slice information
 let popupTimer; // timer to debounce pie slice info popup events
+let resizeTimer; // timer to debounce resizing the pie graph on window resize
 
-// page pie variables
-let height = 600;
-let width = window.innerWidth;
-let radius = Math.min(width, height) / 2;
+// page pie variables ------------------------------------------------------ //
 let g, g2, svg, pie;
+let width = getWidth();
+let height = getHeight();
+let radius = getRadius();
+let arc = getArc(0.7, 0.4);
+let arc2 = getArc(0.9, 0.7);
+let outerArc = getArc(0.9, 0.9);
+let outerArc2 = getArc(0.95, 0.95);
 
-const arc = d3.arc()
-  .innerRadius(radius * 0.7)
-  .outerRadius(radius * 0.4)
-  .cornerRadius(6);
+// pie functions ----------------------------------------------------------- //
+function getWidth () {
+  return window.innerWidth;
+}
 
-const outerArc = d3.arc()
-  .innerRadius(radius * 0.9)
-  .outerRadius(radius * 0.9);
+function getHeight () {
+  return window.innerHeight - 225; // height - (footer + headers + padding)
+}
 
-const arc2 = d3.arc()
-  .innerRadius(radius * 0.9)
-  .outerRadius(radius * 0.7)
-  .cornerRadius(6);
+function getRadius () {
+  return Math.min(width, height) / 2;
+}
 
-const outerArc2 = d3.arc()
-  .innerRadius(radius * 0.95)
-  .outerRadius(radius * 0.95);
+function getArc (innerRadiusScale, outerRadiusScale) {
+  return d3.arc()
+    .innerRadius(radius * innerRadiusScale)
+    .outerRadius(radius * outerRadiusScale)
+    .cornerRadius(6);
+}
 
-// pie functions
 function midAngle (d) {
   return d.startAngle + (d.endAngle - d.startAngle) / 2;
 }
@@ -192,6 +196,7 @@ function closeInfoOnEsc (keyCode) {
   }
 }
 
+// Vue component ----------------------------------------------------------- //
 export default {
   name: 'MolochPie',
   components: { MolochFieldTypeahead },
@@ -210,6 +215,8 @@ export default {
   mounted: function () {
     this.initializeGraph(this.formatDataFromSpigraph(this.graphData));
 
+    // resize the pie with the window
+    window.addEventListener('resize', this.resize);
     // close info popup if the user presses escape
     window.addEventListener('keyup', closeInfoOnEsc);
   },
@@ -265,7 +272,10 @@ export default {
         expression: fullExpression, op: op
       });
     },
-    /* event functions ----------------------------------------------------- */
+    /**
+     * Fired when a second level field typeahead field is selected or removed
+     * @param {Object} field The field the add or remove to the pie graph
+     */
     changeField: function (field) {
       // TODO allow 2 items in this array?
       if (this.fieldTypeaheadList.length > 0) {
@@ -275,6 +285,38 @@ export default {
       }
 
       this.loadData();
+    },
+    /* event functions ----------------------------------------------------- */
+    /**
+     * Resizes the pie graph after the window is resized
+     * Waits for the window resize to stop for .5 sec
+     */
+    resize: function () {
+      if (resizeTimer) { clearTimeout(resizeTimer); }
+      resizeTimer = setTimeout(() => {
+        // recalculate width, height, radius, and arcs
+        width = getWidth();
+        height = getHeight();
+        radius = getRadius();
+        arc = getArc(0.7, 0.4);
+        arc2 = getArc(0.9, 0.7);
+        outerArc = getArc(0.9, 0.9);
+        outerArc2 = getArc(0.95, 0.95);
+
+        // set the new width and height of the pie
+        d3.select('#pie-area svg')
+          .attr('width', width)
+          .attr('height', height)
+          .select('g')
+          .attr('transform', 'translate(' + width / 2 + ',' + height / 2 + ')');
+
+        // redraw the inner pie data
+        this.redraw(g, arc, outerArc, polylineTransform);
+
+        if (g2) { // redraw the outer pie data if it exists
+          this.redraw(g2, arc2, outerArc2, polylineTransform2);
+        }
+      }, 500);
     },
     /* helper functions ---------------------------------------------------- */
     /**
@@ -352,116 +394,6 @@ export default {
       });
 
       this.applyGraphData(data, g, arc, outerArc, polylineTransform, getLabelText);
-    },
-    /**
-     * Displays the information about a pie slice
-     * Note: must be here and not top level so that this.$refs works
-     * @param {Object} d The pie slice data
-     */
-    showInfo: function (d) {
-      closeInfo(); // close open info section
-      // create the vue template
-      if (!popupVue) {
-        popupVue = new Vue({
-          template: `
-            <div class="pie-popup">
-              <table class="table table-borderless table-condensed table-sm">
-                <thead>
-                  <tr>
-                    <th>
-                      Field
-                    </th>
-                    <th>
-                      Value
-                    </th>
-                    <th>
-                      <a class="pull-right cursor-pointer no-decoration"
-                        @click="closeInfo">
-                        <span class="fa fa-close"></span>
-                      </a>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-if="outerFieldObj">
-                    <td>
-                      {{ outerFieldObj.friendlyName }}
-                    </td>
-                    <td>
-                      <moloch-session-field
-                        :field="outerFieldObj"
-                        :value="sliceData.name"
-                        :expr="outerFieldObj.exp"
-                        :parse="true"
-                        :session-btn="true">
-                      </moloch-session-field>
-                    </td>
-                    <td>
-                      <strong>
-                        {{ sliceData.value }}
-                      </strong>
-                    </td>
-                  </tr>
-                  <tr v-else-if="baseFieldObj">
-                    <td>
-                      {{ baseFieldObj.friendlyName }}
-                    </td>
-                    <td>
-                      <moloch-session-field
-                        :field="baseFieldObj"
-                        :value="sliceData.name"
-                        :expr="baseFieldObj.exp"
-                        :parse="true"
-                        :session-btn="true">
-                      </moloch-session-field>
-                    </td>
-                    <td>
-                      <strong>
-                        {{ sliceData.value }}
-                      </strong>
-                    </td>
-                  </tr>
-                  <tr v-if="sliceData.innerData">
-                    <td>
-                      {{ baseFieldObj.friendlyName }}
-                    </td>
-                    <td>
-                      <moloch-session-field
-                        :field="baseFieldObj"
-                        :value="sliceData.innerData.name"
-                        :expr="baseFieldObj.exp"
-                        :parse="true"
-                        :session-btn="true">
-                      </moloch-session-field>
-                    </td>
-                    <td>
-                      <strong>
-                        {{ sliceData.innerData.value }}
-                      </strong>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          `,
-          parent: this,
-          data: {
-            sliceData: d.data.value,
-            baseFieldObj: this.getFieldObj(this.baseField),
-            outerFieldObj: this.fieldTypeaheadList[0] || undefined
-          },
-          methods: {
-            addExpression: function (slice, op) {
-              this.$parent.addExpression(slice, op);
-            },
-            closeInfo: function () {
-              this.$parent.closeInfo();
-            }
-          }
-        }).$mount($(this.$refs.infoPopup)[0].firstChild);
-      }
-      // display the pie popup area
-      $('.pie-popup').show();
     },
     /**
      * Gets a field object based on an exp
@@ -587,6 +519,33 @@ export default {
         .transition().duration(1000)
         .attrTween('points', lineTransFunc);
     },
+    /**
+     * Redraws the pie slices, lines, and label positions
+     * @param {Object} gArea            The d3 g element for the data
+     * @param {Function} arcFunc        The arc function to apply to the slices
+     * @param {Function} outerArcFunc   The outer arc function to apply to the slices
+     * @param {Function} lineTransFunc  The function to apply to draw the lines
+     */
+    redraw: function (gArea, arcFunc, outerArcFunc, lineTransFunc) {
+      gArea.selectAll('path')
+        .transition().duration(1000)
+        .attrTween('d', (d) => {
+          return sliceTransition(d, arcFunc, this._current || d);
+        });
+
+      // set the new position of the text
+      gArea.selectAll('text')
+        .transition().duration(1000)
+        .attrTween('transform', (d) => {
+          return textTransform(d, outerArcFunc, this._current || d);
+        })
+        .styleTween('text-anchor', textTransition);
+
+      // apply transitions to new lines
+      gArea.selectAll('polyline')
+        .transition().duration(1000)
+        .attrTween('points', lineTransFunc);
+    },
     loadData: function () {
       this.$emit('toggleLoad', true);
       this.$emit('toggleError', '');
@@ -681,6 +640,116 @@ export default {
         this.$emit('toggleLoad', false);
         this.$emit('toggleError', error.text || error);
       });
+    },
+    /**
+     * Displays the information about a pie slice
+     * Note: must be here and not top level so that this.$refs works
+     * @param {Object} d The pie slice data
+     */
+    showInfo: function (d) {
+      closeInfo(); // close open info section
+      // create the vue template
+      if (!popupVue) {
+        popupVue = new Vue({
+          template: `
+            <div class="pie-popup">
+              <table class="table table-borderless table-condensed table-sm">
+                <thead>
+                  <tr>
+                    <th>
+                      Field
+                    </th>
+                    <th>
+                      Value
+                    </th>
+                    <th>
+                      <a class="pull-right cursor-pointer no-decoration"
+                        @click="closeInfo">
+                        <span class="fa fa-close"></span>
+                      </a>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="outerFieldObj">
+                    <td>
+                      {{ outerFieldObj.friendlyName }}
+                    </td>
+                    <td>
+                      <moloch-session-field
+                        :field="outerFieldObj"
+                        :value="sliceData.name"
+                        :expr="outerFieldObj.exp"
+                        :parse="true"
+                        :session-btn="true">
+                      </moloch-session-field>
+                    </td>
+                    <td>
+                      <strong>
+                        {{ sliceData.value }}
+                      </strong>
+                    </td>
+                  </tr>
+                  <tr v-else-if="baseFieldObj">
+                    <td>
+                      {{ baseFieldObj.friendlyName }}
+                    </td>
+                    <td>
+                      <moloch-session-field
+                        :field="baseFieldObj"
+                        :value="sliceData.name"
+                        :expr="baseFieldObj.exp"
+                        :parse="true"
+                        :session-btn="true">
+                      </moloch-session-field>
+                    </td>
+                    <td>
+                      <strong>
+                        {{ sliceData.value }}
+                      </strong>
+                    </td>
+                  </tr>
+                  <tr v-if="sliceData.innerData">
+                    <td>
+                      {{ baseFieldObj.friendlyName }}
+                    </td>
+                    <td>
+                      <moloch-session-field
+                        :field="baseFieldObj"
+                        :value="sliceData.innerData.name"
+                        :expr="baseFieldObj.exp"
+                        :parse="true"
+                        :session-btn="true">
+                      </moloch-session-field>
+                    </td>
+                    <td>
+                      <strong>
+                        {{ sliceData.innerData.value }}
+                      </strong>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          `,
+          parent: this,
+          data: {
+            sliceData: d.data.value,
+            baseFieldObj: this.getFieldObj(this.baseField),
+            outerFieldObj: this.fieldTypeaheadList[0] || undefined
+          },
+          methods: {
+            addExpression: function (slice, op) {
+              this.$parent.addExpression(slice, op);
+            },
+            closeInfo: function () {
+              this.$parent.closeInfo();
+            }
+          }
+        }).$mount($(this.$refs.infoPopup)[0].firstChild);
+      }
+      // display the pie popup area
+      $('.pie-popup').show();
     }
   },
   beforeDestroy: function () {
@@ -690,6 +759,7 @@ export default {
     }
 
     // remove listeners
+    window.removeEventListener('resize', this.resize);
     window.removeEventListener('keyup', closeInfoOnEsc);
     // d3 doesn't have .off function to remove listeners,
     // so use .on('listener', null)
