@@ -5410,6 +5410,7 @@ app.get('/spigraphpie', logAction(), (req, res) => {
   buildSessionQuery(req, function(err, query, indices) {
     delete query.sort;
     delete query.aggregations;
+    query.size = 0;
     const size = +req.query.size || 20;
 
     if (!query.query.bool.must) {
