@@ -12,6 +12,6 @@
   },
   "devDependencies": {
     "jshint": "^2.9.5",
-    "lodash": "^4.17.13"
+    "lodash": "^4.17.19"
   }
 }
